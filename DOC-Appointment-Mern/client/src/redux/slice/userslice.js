@@ -12,7 +12,11 @@ const initialState = {
 const userSlice = createSlice({
   name: "user",
   initialState,
-  reducers: {},
+  reducers: {
+    clearUserError: (state) => {
+      state.error = null;
+    },
+  },
   extraReducers: (builder) => {
     builder
       // Get All Users
@@ -21,7 +25,7 @@ const userSlice = createSlice({
       })
       .addCase(getAllUsers.fulfilled, (state, action) => {
         state.loading = false;
-        state.users = action.payload.users;
+        state.users = action.payload?.users || [];
       })
       .addCase(getAllUsers.rejected, (state, action) => {
         state.loading = false;
@@ -34,7 +38,7 @@ const userSlice = createSlice({
       })
       .addCase(getUserDetails.fulfilled, (state, action) => {
         state.loading = false;
-        state.user = action.payload.user;
+        state.user = action.payload?.user || null;
       })
       .addCase(getUserDetails.rejected, (state, action) => {
         state.loading = false;
@@ -56,4 +60,5 @@ const userSlice = createSlice({
   },
 });
 
+export const { clearUserError } = userSlice.actions;
 export default userSlice.reducer;

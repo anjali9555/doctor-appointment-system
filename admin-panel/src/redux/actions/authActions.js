@@ -30,13 +30,13 @@ export const loadToken = createAsyncThunk("auth/loadToken", () => {
   const appData = JSON.parse(localData);
   return appData?.token;
 });
+
 // Get User Details
 export const getUserDetails = createAsyncThunk(
   "user/getUserDetails",
   async (id, thunkApi) => {
     try {
-      // Dhyan dein: URL aapke backend route ke hisaab se hona chahiye
-      const res = await API.get(`/api/v1/user/get-user/${id}`);
+      const res = await API.get(`/user/get-user/${id}`);
       return res.data;
     } catch (error) {
       const message =

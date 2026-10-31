@@ -7,9 +7,9 @@ import AppointmentsReducer from "./slice/appointmentSlice";
 const store = configureStore({
   reducer: {
     auth: AuthReducer,
-    // user: UserReducer,
+    user: UserReducer,
     doctor: DoctorReducer,
-    // appointments: AppointmentsReducer,
+    appointments: AppointmentsReducer,
   },
 });
 

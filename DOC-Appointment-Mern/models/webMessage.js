@@ -2,23 +2,39 @@ import mongoose from "mongoose";
 
 const webMessageSchema = new mongoose.Schema(
   {
-    name: { 
-      type: String, 
-      required: [true, "name is required"] 
+    name: {
+      type: String,
+      required: [true, "Name is required"],
+      trim: true
     },
-    // FIX: Changed "conatct" to "contact" to match req.body in your controller
     contact: {
       type: String,
-      required: [true, "contact no or email is required"],
+      required: [true, "Contact number or email is required"],
+      trim: true
     },
-    message: { 
-      type: String, 
-      required: [true, "message is required"] 
+    message: {
+      type: String,
+      required: [true, "Message is required"],
+      trim: true
     },
+    status: {
+      type: String,
+      enum: ["pending", "resolved", "in-progress"],
+      default: "pending"
+    },
+    notes: {
+      type: String,
+      default: ""
+    },
+    resolvedAt: {
+      type: Date,
+      default: null
+    }
   },
   { timestamps: true }
 );
 
-const webmessageModel = mongoose.model("webmessage", webMessageSchema);
+webMessageSchema.index({ status: 1, createdAt: -1 });
 
-export default webmessageModel;
+const WebMessageModel = mongoose.models.WebMessage || mongoose.models.webmessage || mongoose.model("WebMessage", webMessageSchema, "webmessages");
+export default WebMessageModel;

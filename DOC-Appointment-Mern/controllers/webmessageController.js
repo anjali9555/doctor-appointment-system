@@ -1,95 +1,121 @@
-import webmessageModel from "../models/webMessage.js";
+import WebMessageModel from "../models/webMessage.js";
 
-//create message
-export const createMessage = async (req, res) => {
+// ==========================================
+// CREATE CONTACT MESSAGE (Public)
+// ==========================================
+export const createMessage = async (req, res, next) => {
   try {
     const { name, contact, message } = req.body;
-    
-    // Validation
+
     if (!name || !contact || !message) {
-      // FIX: 400 is the proper status code for missing fields/Bad Request
-      return res.status(400).send({
+      return res.status(400).json({
         success: false,
-        message: "Please Provide All Fields",
+        message: "Name, contact details (phone or email), and message are required.",
       });
     }
-    
-    // Save to Database
-    const webMessage = new webmessageModel({ name, contact, message });
-    await webMessage.save(); // FIX: Added "await" so it actually waits for DB save
-    
-    // Success Response
-    res.status(201).send({
-      success: true,
-      message: "Your Message Sent Successfully",
-      webMessage,
-    });
-  } catch (error) {
-    console.log(error);
-    res.status(500).send({
-      success: false,
-      message: "Error creating web message",
-      error
-    });
-  }
-};
-// GET ALL MESSAGES
-export const getAllMessages = async (req, res) => {
-  try {
-    const webMessages = await webmessageModel.find({});
-    
-    // FIX: Changed status code to 200 (OK for fetching data)
-    res.status(200).send({
-      success: true,
-      message: "all web messages fetched successfully",
-      totalCount: webMessages.length,
-      webMessages,
-    });
-  } catch (error) {
-    console.log(error);
-    res.status(500).send({
-      success: false,
-      message: "Error in get all Web Message Api",
-      error,
-    });
-  }
-};
-// ... (tumhare upar ke createMessage aur getAllMessages functions yahan rahenge) ...
 
-// DELETE MESSAGE
-export const deleteWebMessage = async (req, res) => {
+    const newMessage = new WebMessageModel({
+      name: name.trim(),
+      contact: contact.trim(),
+      message: message.trim(),
+      status: "pending",
+    });
+
+    await newMessage.save();
+
+    return res.status(201).json({
+      success: true,
+      message: "Your message has been received. Our clinical support team will reach out shortly.",
+      messageData: newMessage,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// ==========================================
+// GET ALL CONTACT MESSAGES (Admin Only)
+// ==========================================
+export const getAllMessages = async (req, res, next) => {
+  try {
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 20;
+    const status = req.query.status;
+    const skip = (page - 1) * limit;
+
+    const query = {};
+    if (status) query.status = status;
+
+    const [messages, totalCount] = await Promise.all([
+      WebMessageModel.find(query).sort({ createdAt: -1 }).skip(skip).limit(limit).lean(),
+      WebMessageModel.countDocuments(query),
+    ]);
+
+    return res.status(200).json({
+      success: true,
+      message: "Contact messages fetched successfully",
+      totalCount,
+      page,
+      totalPages: Math.ceil(totalCount / limit),
+      messages,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// ==========================================
+// UPDATE MESSAGE STATUS (Admin Only)
+// ==========================================
+export const updateMessageStatus = async (req, res, next) => {
   try {
     const { id } = req.params;
-    if (!id) {
-      return res.status(404).send({
+    const { status, notes } = req.body;
+
+    const message = await WebMessageModel.findById(id);
+    if (!message) {
+      return res.status(404).json({
         success: false,
-        message: "Please Provide message id"
+        message: "Message not found.",
       });
     }
 
-    // FIX: Using findByIdAndDelete directly. If it doesn't find it, it returns null.
-    const webMessage = await webmessageModel.findByIdAndDelete(id);
-    
-    if (!webMessage) {
-      return res.status(404).send({
-        success: false,
-        message: "Message not found or already deleted"
-      });
-    }
+    if (status) message.status = status;
+    if (notes !== undefined) message.notes = notes;
+    if (status === "resolved") message.resolvedAt = new Date();
 
-    // FIX: Changed status to 200 (OK)
-    res.status(200).send({
+    await message.save();
+
+    return res.status(200).json({
       success: true,
-      message: "Message has been deleted",
+      message: "Message status updated successfully",
+      messageData: message,
     });
-
   } catch (error) {
-    console.log(error);
-    res.status(500).send({
-      success: false,
-      // FIX: Corrected the typo and API name
-      message: "Error in Delete Web Message API", 
-      error,
+    next(error);
+  }
+};
+
+// ==========================================
+// DELETE MESSAGE (Admin Only)
+// ==========================================
+export const deleteWebMessage = async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const deleted = await WebMessageModel.findByIdAndDelete(id);
+
+    if (!deleted) {
+      return res.status(404).json({
+        success: false,
+        message: "Message not found.",
+      });
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: "Message deleted successfully.",
     });
+  } catch (error) {
+    next(error);
   }
 };

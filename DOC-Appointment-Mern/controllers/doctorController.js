@@ -1,263 +1,444 @@
-import doctorModel from "../models/doctorModel.js";
+import DoctorModel from "../models/doctorModel.js";
+import AppointmentModel from "../models/appointmentsModel.js";
+import ReviewModel from "../models/reviewModel.js";
+import { getAvailableSlotsForDoctor } from "../services/schedulingService.js";
+import { cacheGet, cacheSet, invalidateDoctorCaches } from "../services/cacheService.js";
+import { MASTER_SPECIALTIES } from "../config/specialties.js";
 
-// add doctor
-export const addDoctor = async (req, res) => {
+// ==========================================
+// 1. ADD / REGISTER A NEW DOCTOR (Admin Only)
+// ==========================================
+export const addDoctor = async (req, res, next) => {
   try {
-    // Note: 'image' is removed from destructuring here because it comes from req.file, not req.body
-    const { name, email, degree, fees, about, gender, phone, address, speciality, experience, dob } = req.body;
-    
-    // Validation
-    if (!name || !email || !degree || !fees || !about || !gender || !phone || !address || !speciality || !experience ) {
-      return res.status(400).send({
+    const {
+      name,
+      email,
+      degree,
+      speciality,
+      fees,
+      experience,
+      about,
+      gender,
+      phone,
+      address,
+      dob,
+      workingDays,
+      workingHoursStart,
+      workingHoursEnd,
+      slotDuration,
+    } = req.body;
+
+    if (!name || !email || !degree || !speciality || fees === undefined || !experience || !about) {
+      return res.status(400).json({
         success: false,
-        message: "Please Provide All Fields"
+        message: "Please provide all required fields: name, email, degree, speciality, fees, experience, and about.",
       });
     }
 
-    // Convert file buffer to base64 safely
-    const photoBase64 = req.file ? req.file.buffer.toString('base64') : undefined;
+    const existingDoctor = await DoctorModel.findOne({ email: email.toLowerCase().trim() });
+    if (existingDoctor) {
+      return res.status(409).json({
+        success: false,
+        message: "A doctor with this email is already registered.",
+      });
+    }
 
-    // FIX: Use curly braces {} to create the object
-    const doctorData = { 
-      name, 
-      email, 
-      degree, 
-      fees, 
-      about, 
-      gender, 
-      phone, 
-      address, 
-      image: photoBase64, 
-      speciality, 
-      experience, 
-      
+    let imageString = "";
+    if (req.file) {
+      imageString = `data:${req.file.mimetype};base64,${req.file.buffer.toString("base64")}`;
+    }
+
+    const doctorData = {
+      name: name.trim(),
+      email: email.toLowerCase().trim(),
+      degree,
+      fees: Number(fees),
+      about,
+      gender: gender || "",
+      phone: phone || "",
+      address: address || "",
+      dob: dob || "",
+      speciality: speciality.trim(),
+      experience: Number(experience),
+      image: imageString,
+      rating: 0,
+      numReviews: 0,
+      workingDays: workingDays ? (Array.isArray(workingDays) ? workingDays : JSON.parse(workingDays)) : undefined,
+      workingHours: {
+        start: workingHoursStart || "09:00",
+        end: workingHoursEnd || "17:00",
+      },
+      slotDuration: slotDuration ? Number(slotDuration) : 30,
     };
-    
-    const doctor = new doctorModel(doctorData);
+
+    const doctor = new DoctorModel(doctorData);
     await doctor.save();
 
-    res.status(201).send({
+    // Invalidate cached doctor listings
+    await invalidateDoctorCaches();
+
+    return res.status(201).json({
       success: true,
-      message: "Doctor Created",
+      message: "Doctor created successfully",
       doctor,
     });
   } catch (error) {
-    console.log(error);
-    res.status(500).send({
-      success: false,
-      message: "Error In add Doctor API",
-      error,
-    });
+    next(error);
   }
 };
-// GET ALL DOCTORS
+
 // ==========================================
-export const getAllDoctor = async (req, res) => {
+// 2. GET ALL DOCTORS (With Cache-Aside, Search, Filter & Pagination)
+// ==========================================
+export const getAllDoctor = async (req, res, next) => {
   try {
-    // Fetch all doctors from the database
-    const doctors = await doctorModel.find({});
-    
-    // Send response
-    res.status(200).send({
+    const {
+      search,
+      speciality,
+      minFees,
+      maxFees,
+      minExperience,
+      available,
+      sort,
+      page = 1,
+      limit = 20,
+    } = req.query;
+
+    const cacheKey = `doctors:list:${JSON.stringify(req.query)}`;
+    const cachedResponse = await cacheGet(cacheKey);
+    if (cachedResponse) {
+      res.setHeader("X-Cache", "HIT");
+      return res.status(200).json(cachedResponse);
+    }
+
+    const query = {};
+
+    if (search) {
+      query.$or = [
+        { name: { $regex: search, $options: "i" } },
+        { speciality: { $regex: search, $options: "i" } },
+        { degree: { $regex: search, $options: "i" } },
+      ];
+    }
+
+    if (speciality && speciality !== "All" && speciality !== "all" && speciality !== "All Specialties") {
+      const cleanSpeciality = speciality.trim();
+      query.speciality = { $regex: `^\\s*${cleanSpeciality}\\s*$`, $options: "i" };
+    }
+
+    if (available !== undefined && available !== "") {
+      query.available = available === "true";
+    }
+
+    if (minFees || maxFees) {
+      query.fees = {};
+      if (minFees) query.fees.$gte = Number(minFees);
+      if (maxFees) query.fees.$lte = Number(maxFees);
+    }
+
+    if (minExperience) {
+      query.experience = { $gte: Number(minExperience) };
+    }
+
+    // Sort options
+    let sortOption = { createdAt: -1 };
+    if (sort === "fees_asc") sortOption = { fees: 1 };
+    else if (sort === "fees_desc") sortOption = { fees: -1 };
+    else if (sort === "rating") sortOption = { rating: -1 };
+    else if (sort === "experience") sortOption = { experience: -1 };
+
+    const pageNum = Math.max(1, parseInt(page) || 1);
+    const limitNum = Math.min(100, Math.max(1, parseInt(limit) || 20));
+    const skip = (pageNum - 1) * limitNum;
+
+    const [doctors, totalCount] = await Promise.all([
+      DoctorModel.find(query).sort(sortOption).skip(skip).limit(limitNum).lean(),
+      DoctorModel.countDocuments(query),
+    ]);
+
+    const responsePayload = {
       success: true,
-      message: 'All Doctors List',
-      totalCount: doctors.length,
-      doctors
-    });
+      message: "Doctors retrieved successfully",
+      totalCount,
+      page: pageNum,
+      totalPages: Math.ceil(totalCount / limitNum),
+      doctors,
+    };
+
+    // Cache doctor listing for 10 minutes (600s)
+    await cacheSet(cacheKey, responsePayload, 600);
+
+    res.setHeader("X-Cache", "MISS");
+    return res.status(200).json(responsePayload);
   } catch (error) {
-    console.log(error);
-    res.status(500).send({
-      success: false,
-      message: "Error in get all Doctor API",
-      error,
-    });
+    next(error);
   }
 };
+
 // ==========================================
-// GET DOCTOR DETAILS
+// 3. GET DOCTOR DETAILS (With Profile Cache & Reviews)
 // ==========================================
-export const getDoctorDetails = async (req, res) => {
+export const getDoctorDetails = async (req, res, next) => {
   try {
     const { id } = req.params;
-    
-    // Check if ID is provided
     if (!id) {
-      return res.status(404).send({
+      return res.status(400).json({
         success: false,
-        message: "Please add doctor id", // Fixed typo
+        message: "Doctor ID is required.",
       });
     }
 
-    // Find doctor by ID
-    const doctor = await doctorModel.findById(id);
-    
-    // Check if doctor exists
+    const cacheKey = `doctors:profile:${id}`;
+    const cachedProfile = await cacheGet(cacheKey);
+    if (cachedProfile) {
+      res.setHeader("X-Cache", "HIT");
+      return res.status(200).json(cachedProfile);
+    }
+
+    const doctor = await DoctorModel.findById(id).lean();
     if (!doctor) {
-      return res.status(404).send({
+      return res.status(404).json({
         success: false,
-        message: "No Doctor Found With This ID",
+        message: "No doctor found with this ID.",
       });
     }
 
-    // Success response
-    res.status(200).send({
-      success: true,
-      message: "Details Fetched Successfully",
-      doctor,
-    });
+    // Fetch verified reviews for this doctor
+    const reviews = await ReviewModel.find({ doctorId: doctor._id })
+      .populate("userId", "name image")
+      .sort({ createdAt: -1 })
+      .limit(20)
+      .lean();
 
+    const responsePayload = {
+      success: true,
+      message: "Doctor details fetched successfully",
+      doctor,
+      reviews,
+    };
+
+    // Cache profile for 5 minutes (300s)
+    await cacheSet(cacheKey, responsePayload, 300);
+
+    res.setHeader("X-Cache", "MISS");
+    return res.status(200).json(responsePayload);
   } catch (error) {
-    console.log(error);
-    res.status(500).send({
-      success: false,
-      message: "Error in get doctor details API", // Fixed typos
-      error,
-    });
+    next(error);
   }
 };
-// update doctor
+
 // ==========================================
-export const updateDoctor = async (req, res) => {
+// 4. GET DISTINCT SPECIALITIES (Cached)
+// ==========================================
+export const getSpecialities = async (req, res, next) => {
+  try {
+    const cacheKey = "doctor_specialities";
+    const cached = await cacheGet(cacheKey);
+    if (cached) {
+      res.setHeader("X-Cache", "HIT");
+      return res.status(200).json(cached);
+    }
+
+    const dbSpecialties = await DoctorModel.distinct("speciality");
+
+    // Case-insensitive merge: populate all master specialties first, then merge custom ones
+    const mergedMap = new Map();
+    MASTER_SPECIALTIES.forEach((s) => {
+      mergedMap.set(s.toLowerCase().trim(), s);
+    });
+
+    dbSpecialties.forEach((s) => {
+      if (s && s.trim()) {
+        const clean = s.trim();
+        const lower = clean.toLowerCase();
+        if (!mergedMap.has(lower)) {
+          mergedMap.set(lower, clean);
+        }
+      }
+    });
+
+    const payload = {
+      success: true,
+      specialities: Array.from(mergedMap.values()),
+    };
+
+    await cacheSet(cacheKey, payload, 1800); // 30 mins
+    res.setHeader("X-Cache", "MISS");
+    return res.status(200).json(payload);
+  } catch (error) {
+    next(error);
+  }
+};
+
+// ==========================================
+// 5. UPDATE DOCTOR (Admin Only)
+// ==========================================
+export const updateDoctor = async (req, res, next) => {
   try {
     const { id } = req.params;
-    
-    // Check if ID is provided
-    if (!id) {
-      return res.status(404).send({
-        success: false,
-        message: "Please add doctor id", 
-      });
+    const {
+      name,
+      email,
+      degree,
+      speciality,
+      fees,
+      experience,
+      about,
+      address,
+      phone,
+      gender,
+      available,
+      workingDays,
+      workingHoursStart,
+      workingHoursEnd,
+      slotDuration,
+    } = req.body;
+
+    const updateData = {};
+    if (name) updateData.name = name.trim();
+    if (email) updateData.email = email.toLowerCase().trim();
+    if (degree) updateData.degree = degree;
+    if (speciality) updateData.speciality = speciality.trim();
+    if (fees !== undefined) updateData.fees = Number(fees);
+    if (about) updateData.about = about;
+    if (address) updateData.address = address;
+    if (phone) updateData.phone = phone;
+    if (gender) updateData.gender = gender;
+    if (experience !== undefined) updateData.experience = Number(experience);
+    if (available !== undefined) updateData.available = available === true || available === "true";
+
+    if (workingDays) {
+      updateData.workingDays = Array.isArray(workingDays) ? workingDays : JSON.parse(workingDays);
+    }
+    if (workingHoursStart || workingHoursEnd) {
+      updateData.workingHours = {
+        start: workingHoursStart || "09:00",
+        end: workingHoursEnd || "17:00",
+      };
+    }
+    if (slotDuration) updateData.slotDuration = Number(slotDuration);
+
+    if (req.file) {
+      updateData.image = `data:${req.file.mimetype};base64,${req.file.buffer.toString("base64")}`;
     }
 
-    // Extract body data
-    const data = req.body;
-    
-    // Convert new image to base64 ONLY if a file was uploaded
-    const photoBase64 = req.file ? req.file.buffer.toString('base64') : undefined;
-    
-    // FIX: If a new image was uploaded, attach it to the data object
-    if (photoBase64) {
-      data.image = photoBase64;
-    }
-
-    // Update the doctor document
-    // FIX: Changed returnOriginal: false to the standard new: true
-    const doctor = await doctorModel.findByIdAndUpdate(
+    const updatedDoctor = await DoctorModel.findByIdAndUpdate(
       id,
-      { $set: data },
-      { new: true, runValidators: true } // runValidators ensures the new data matches your schema rules
+      { $set: updateData },
+      { new: true, runValidators: true }
     );
 
-    // If ID was invalid or doctor deleted
-    if (!doctor) {
-      return res.status(404).send({
+    if (!updatedDoctor) {
+      return res.status(404).json({
         success: false,
-        message: "Doctor not found to update",
+        message: "Doctor not found.",
       });
     }
 
-    res.status(200).send({
+    // Invalidate cached listings and profiles
+    await invalidateDoctorCaches();
+
+    return res.status(200).json({
       success: true,
-      message: "Doctor Details Updated",
+      message: "Doctor profile updated successfully",
+      doctor: updatedDoctor,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// ==========================================
+// 6. DELETE OR DEACTIVATE DOCTOR (Admin Only)
+// ==========================================
+export const deleteDoctor = async (req, res, next) => {
+  try {
+    const { id } = req.params;
+
+    // Check for active booked future appointments
+    const activeAppointments = await AppointmentModel.countDocuments({
+      doctorId: id,
+      status: { $in: ["pending", "confirmed"] },
+    });
+
+    if (activeAppointments > 0) {
+      // Soft-deactivate to avoid breaking historical records
+      await DoctorModel.findByIdAndUpdate(id, { available: false });
+      await invalidateDoctorCaches();
+      return res.status(200).json({
+        success: true,
+        message: `Doctor has ${activeAppointments} active appointments and was safely marked unavailable rather than deleted.`,
+        deactivated: true,
+      });
+    }
+
+    await DoctorModel.findByIdAndDelete(id);
+    await invalidateDoctorCaches();
+
+    return res.status(200).json({
+      success: true,
+      message: "Doctor record deleted successfully",
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// ==========================================
+// 7. TOGGLE DOCTOR AVAILABILITY STATUS (Admin Only)
+// ==========================================
+export const updateAvailableStatus = async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const doctor = await DoctorModel.findById(id);
+
+    if (!doctor) {
+      return res.status(404).json({
+        success: false,
+        message: "Doctor not found.",
+      });
+    }
+
+    doctor.available = !doctor.available;
+    await doctor.save();
+
+    await invalidateDoctorCaches();
+
+    return res.status(200).json({
+      success: true,
+      message: `Doctor status updated to ${doctor.available ? "Available" : "Unavailable"}`,
+      available: doctor.available,
       doctor,
     });
-
   } catch (error) {
-    console.log(error);
-    res.status(500).send({
-      success: false,
-      message: "Error In update Doctor API", // Fixed typo
-      error,
-    });
+    next(error);
   }
 };
+
 // ==========================================
-// DELETE DOCTOR
+// 8. DYNAMIC AVAILABLE SLOTS FOR A SPECIFIC DATE
 // ==========================================
-export const deleteDoctor = async (req, res) => {
+export const getDoctorSlots = async (req, res, next) => {
   try {
     const { id } = req.params;
+    const { date } = req.query;
 
-    if (!id) {
-      return res.status(404).send({
+    if (!date) {
+      return res.status(400).json({
         success: false,
-        message: "Please add doctor id", // FIX: Spelling theek ki
+        message: "Date query parameter is required (format: YYYY-MM-DD)",
       });
     }
 
-    // FIX: Result ko variable mein store kiya taaki check kar sakein
-    const doctor = await doctorModel.findByIdAndDelete(id);
+    // Always calculate fresh slots directly from confirmed database reservations!
+    const slotData = await getAvailableSlotsForDoctor(id, date);
 
-    // FIX: Agar doctor nahi mila (null) toh 404 return karo
-    if (!doctor) {
-      return res.status(404).send({
-        success: false,
-        message: "Doctor not found or already deleted",
-      });
-    }
-
-    res.status(200).send({
+    return res.status(200).json({
       success: true,
-      message: "Doctor Has been Deleted",
+      message: "Available slots fetched successfully",
+      ...slotData,
     });
-
   } catch (error) {
-    console.log(error);
-    res.status(500).send({
-      success: false,
-      message: "Error in delete Doctor API", // FIX: DOctor -> Doctor
-      error,
-    });
-  }
-};
-// update status 
-export const updateAvailableStatus = async (req, res) => {
-  try {
-    const { id } = req.params;
-
-    if (!id) {
-      return res.status(404).send({
-        success: false,
-        message: "Please add doctor id", 
-      });
-    }
-
-    // FIX: Spelling theek ki
-    const { availableStatus } = req.body; 
-    
-    if (availableStatus === undefined) { // FIX: Changed check logic for booleans
-        return res.status(400).send({
-          success: false,
-          message: "Please provide available status",
-        });
-    }
-
-    // FIX: new:true ensure karta hai ki updated data return ho
-    const doctor = await doctorModel.findByIdAndUpdate(
-      id,
-      { $set: { available: availableStatus } },
-      { new: true, runValidators: true } 
-    );
-
-    if (!doctor) {
-        return res.status(404).send({
-          success: false,
-          message: "Doctor not found to update status",
-        });
-    }
-
-    res.status(200).send({
-      success: true,
-      message: "Doctor Available Status Has been Updated",
-      doctor
-    });
-
-  } catch (error) {
-    console.log(error);
-    res.status(500).send({
-      success: false,
-      message: "Error in update available Doctor API", 
-      error,
-    });
+    next(error);
   }
 };

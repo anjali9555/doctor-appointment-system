@@ -6,26 +6,30 @@ import Home from "./pages/Home";
 import Allusers from "./pages/user/AllUsers";
 import UserDetails from "./pages/user/UserDetails";
 import AllDoctors from "./pages/doctors/AllDoctors";
-import AddDoctor from './pages/doctors/AddDoctor';
+import AddDoctor from "./pages/doctors/AddDoctor";
 import DoctorDetails from "./pages/doctors/DoctorDetails";
 import AllAppointments from "./pages/appointments/AllAppointments";
 import AppointmentDetails from "./pages/appointments/AppointmentDetails";
+import AllMessages from "./pages/messages/AllMessages";
+import KnowledgeBaseManager from "./pages/knowledge/KnowledgeBaseManager";
 import "./App.css";
 
 function App() {
   return (
     <>
-      <Toaster />
+      <Toaster position="top-right" />
       <Routes>
         <Route path="/" element={<Login />} />
         <Route path="/home" element={<Home />} />
         <Route path="/all-users" element={<Allusers />} />
-        <Route path="/user-details/:id" element={<UserDetails />} /> {/* Yahan /> add kar diya hai */}
+        <Route path="/user-details/:id" element={<UserDetails />} />
         <Route path="/all-doctors" element={<AllDoctors />} />
         <Route path="/add-doctor" element={<AddDoctor />} />
         <Route path="/doctor-details/:id" element={<DoctorDetails />} />
         <Route path="/all-appointments" element={<AllAppointments />} />
         <Route path="/appointment-details/:id" element={<AppointmentDetails />} />
+        <Route path="/messages" element={<AllMessages />} />
+        <Route path="/knowledge-base" element={<KnowledgeBaseManager />} />
       </Routes>
     </>
   );

@@ -9,7 +9,6 @@ const EditUserProfile = ({ isOpen, onClose }) => {
   const dispatch = useDispatch();
   const navigate = useNavigate();
 
-  // Redux state se user, success, error nikal rahe hain
   const { user, success, error } = useSelector((state) => state.auth);
 
   const [name, setName] = useState("");
@@ -18,13 +17,13 @@ const EditUserProfile = ({ isOpen, onClose }) => {
   const [dob, setDob] = useState("");
   const [address, setAddress] = useState("");
   const [image, setImage] = useState("");
+
   useEffect(() => {
     if (isOpen) {
       dispatch(reset());
     }
   }, [isOpen, dispatch]);
 
-  // Jab user data load ho, toh form fields mein purana data set ho jaye
   useEffect(() => {
     if (user) {
       setName(user?.name || "");
@@ -36,11 +35,12 @@ const EditUserProfile = ({ isOpen, onClose }) => {
     }
   }, [user]);
 
-  // Handle Update Form Submission
   const handleUpdate = (e) => {
     e.preventDefault();
     const formData = new FormData();
-    formData.append("image", image);
+    if (image && typeof image === "object") {
+      formData.append("image", image);
+    }
     formData.append("name", name);
     formData.append("phone", phone);
     formData.append("address", address);
@@ -52,7 +52,6 @@ const EditUserProfile = ({ isOpen, onClose }) => {
     }
   };
 
-  // Success ya Error handle karne ke liye useEffect
   useEffect(() => {
     if (success) {
       toast.success("Profile Updated Successfully!");
@@ -83,23 +82,29 @@ const EditUserProfile = ({ isOpen, onClose }) => {
             <div className="modal-body">
               {/* Profile Image Preview & Input */}
               <div className="d-flex flex-column align-items-center mb-3">
-                <img
-                  src={
-                    typeof image === "object"
-                      ? URL.createObjectURL(image)
-                      : (image ? `data:image/jpeg;base64,${image}` : "https://cdn-icons-png.flaticon.com/512/149/149071.png")
-                  }
-                  alt="userPic"
-                  className="rounded-circle mb-2 shadow-sm"
-                  height={80}
-                  width={80}
-                  style={{ objectFit: "cover" }}
-                />
+                {image ? (
+                  <img
+                    src={
+                      typeof image === "object"
+                        ? URL.createObjectURL(image)
+                        : (image.startsWith("http") || image.startsWith("data:")
+                            ? image
+                            : `data:image/jpeg;base64,${image}`)
+                    }
+                    alt="userPic"
+                    className="rounded-circle mb-2 shadow-sm"
+                    height={80}
+                    width={80}
+                    style={{ objectFit: "cover" }}
+                  />
+                ) : null}
                 <input
                   type="file"
                   className="form-control form-control-sm"
+                  accept="image/png, image/jpeg, image/webp"
                   onChange={(e) => setImage(e.target.files[0])}
                 />
+                <small className="text-muted mt-1">Profile photograph is optional</small>
               </div>
 
               {/* Name */}

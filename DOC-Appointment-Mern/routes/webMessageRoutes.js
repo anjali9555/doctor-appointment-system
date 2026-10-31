@@ -1,23 +1,24 @@
-import express from 'express';
+import express from "express";
 import {
   createMessage,
   getAllMessages,
-  deleteWebMessage // FIX: Import the delete controller
-} from "../controllers/webMessageController.js";
-
-// FIX: Import userAuth along with isAdmin
+  updateMessageStatus,
+  deleteWebMessage,
+} from "../controllers/webmessageController.js";
 import { userAuth, isAdmin } from "../middlewares/authMiddlewares.js";
 
 const router = express.Router();
 
-// CREATE MESSAGE || POST
+// CREATE MESSAGE || POST (Public)
 router.post("/create", createMessage);
 
-// GET ALL MESSAGES || GET
-router.get("/get-all", getAllMessages);
+// GET ALL MESSAGES || GET (Admin Only - FIXED)
+router.get("/get-all", userAuth, isAdmin, getAllMessages);
 
-// DELETE MSG || DELETE
-// FIX: Added userAuth before isAdmin so req.user is properly populated
+// UPDATE MESSAGE STATUS || PATCH (Admin Only)
+router.patch("/update-status/:id", userAuth, isAdmin, updateMessageStatus);
+
+// DELETE MESSAGE || DELETE (Admin Only)
 router.delete("/delete/:id", userAuth, isAdmin, deleteWebMessage);
 
 export default router;

@@ -4,28 +4,101 @@ const appointmentSchema = new mongoose.Schema(
   {
     userId: {
       type: mongoose.Schema.Types.ObjectId,
-      required: true, // FIX: 'require' ko 'required' kiya
-      ref: "user",
+      required: [true, "Patient ID is required"],
+      ref: "User",
+      index: true,
     },
     doctorId: {
       type: mongoose.Schema.Types.ObjectId,
-      required: true, // FIX: 'require' ko 'required' kiya
-      ref: "doctor",
+      required: [true, "Doctor ID is required"],
+      ref: "Doctor",
+      index: true,
     },
-    slotDate: { type: String, required: true },
-    slotTime: { type: String, required: true },
-    amount: { type: String, required: true },
+    slotDate: {
+      type: String,
+      required: [true, "Slot date is required"],
+      index: true,
+    },
+    slotTime: {
+      type: String,
+      required: [true, "Slot time is required"]
+    },
+    amount: {
+      type: Number,
+      required: [true, "Consultation fee amount is required"]
+    },
     status: {
       type: String,
       required: true,
-      enum: ["pending", "completed", "cancel"],
-      default: "pending", // Extra protection: Default set kar diya
+      enum: ["pending", "confirmed", "completed", "cancelled", "cancel", "rejected", "no-show"],
+      default: "pending",
+      index: true,
     },
-    payment: { type: Boolean, default: false }, // FIX: 'defult' ko 'default' kiya
+    payment: {
+      type: Boolean,
+      default: false
+    },
+    paymentMethod: {
+      type: String,
+      enum: ["cash", "online", "razorpay"],
+      default: "cash"
+    },
+    paymentId: {
+      type: String,
+      default: ""
+    },
+    cancellationReason: {
+      type: String,
+      default: ""
+    },
+    cancelledBy: {
+      type: String,
+      enum: ["patient", "admin", "doctor", "system", ""],
+      default: ""
+    },
+    patientNotes: {
+      type: String,
+      default: ""
+    },
+    rescheduledFrom: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Appointment",
+      default: null
+    },
+    idempotencyKey: {
+      type: String,
+      default: "",
+      index: true,
+    },
+    remindersSent: {
+      type: [String], // e.g. ["24h", "1h"] to prevent duplicate reminder deliveries
+      default: [],
+    },
   },
   { timestamps: true }
 );
 
-const appointmentModel = mongoose.model("appointment", appointmentSchema);
+// High-performance query compound indexes
+appointmentSchema.index({ userId: 1, createdAt: -1 });
+appointmentSchema.index({ doctorId: 1, slotDate: 1 });
+appointmentSchema.index({ status: 1, createdAt: -1 });
+appointmentSchema.index({ slotDate: 1, status: 1 });
 
-export default appointmentModel;
+// Engine-level uniqueness constraint:
+// Allows multiple simultaneous 'pending' requests, but strictly enforces only ONE 'confirmed' appointment per slot.
+appointmentSchema.index(
+  { doctorId: 1, slotDate: 1, slotTime: 1 },
+  {
+    unique: true,
+    partialFilterExpression: {
+      status: "confirmed"
+    }
+  }
+);
+
+const AppointmentModel =
+  mongoose.models.Appointment ||
+  mongoose.models.appointment ||
+  mongoose.model("Appointment", appointmentSchema, "appointments");
+
+export default AppointmentModel;

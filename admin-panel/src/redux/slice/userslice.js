@@ -1,5 +1,5 @@
 import { createSlice } from "@reduxjs/toolkit";
-import { getAllUsers, getUserDetails,getStats } from "../actions/userAction";
+import { getAllUsers, getUserDetails, getStats } from "../actions/userAction";
 
 const userSlice = createSlice({
   name: "user",
@@ -10,9 +10,15 @@ const userSlice = createSlice({
     loading: false,
     success: false,
     error: null,
-    stats: null
+    stats: null,
   },
-  reducers: {},
+  reducers: {
+    reset: (state) => {
+      state.loading = false;
+      state.success = false;
+      state.error = null;
+    },
+  },
   extraReducers: (builder) => {
     builder
       // --- GET ALL USERS ---
@@ -34,8 +40,7 @@ const userSlice = createSlice({
       .addCase(getStats.fulfilled, (state, action) => {
         state.loading = false;
         state.success = true;
-        console.log("🔥 Backend se aaya poora action.payload:", action.payload); // 👈 Yeh line dalo
-        state.stats = action.payload; // 🔥 Backend se aane wala 'stats' object yahan store hoga
+        state.stats = action.payload;
       })
       .addCase(getStats.rejected, (state, action) => {
         state.loading = false;
@@ -58,5 +63,6 @@ const userSlice = createSlice({
       });
   },
 });
+
 export const { reset } = userSlice.actions;
 export default userSlice.reducer;

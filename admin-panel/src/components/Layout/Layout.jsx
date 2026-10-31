@@ -1,23 +1,42 @@
-import React from "react";
+import React, { useEffect } from "react";
+import { useNavigate } from "react-router-dom";
+import toast from "react-hot-toast";
 import Menus from "./Menus";
-import Footer from "./Footer";
 
 const Layout = ({ children }) => {
-  return (
-    <div className="container-fluid m-0 p-0">
-      <div className="row g-0">
-        {/* Left Dark Sidebar */}
-        <div className="col-md-2 bg-dark text-light min-vh-100 p-3">
-          {/* Upar wala Admin panel yahan se hata diya hai */}
-          <Menus />
-        </div>
+  const navigate = useNavigate();
 
-        {/* Right Main Content */}
-        <div className="col-md-10 p-4">
-          <div className="content">{children}</div>
-        </div>
+  useEffect(() => {
+    try {
+      const stored = localStorage.getItem("appData");
+      if (!stored) {
+        toast.error("Please login to access admin panel");
+        navigate("/");
+        return;
+      }
+      const parsed = JSON.parse(stored);
+      const user = parsed?.user;
+      const isAdmin = user?.isAdmin === true || user?.role === "admin";
+      if (!parsed?.token || !isAdmin) {
+        toast.error("Access denied. Admin privileges required.");
+        localStorage.removeItem("appData");
+        navigate("/");
+      }
+    } catch {
+      localStorage.removeItem("appData");
+      navigate("/");
+    }
+  }, [navigate]);
+
+  return (
+    <div className="d-flex min-vh-100 bg-light">
+      {/* Sidebar */}
+      <Menus />
+
+      {/* Main Content Area */}
+      <div className="flex-grow-1 overflow-auto" style={{ maxHeight: "100vh" }}>
+        {children}
       </div>
-      <Footer />
     </div>
   );
 };
